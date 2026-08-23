@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  email     String   @unique
+  avatar    String?
+  createdAt DateTime @default(now())
+
+  playlists  Playlist[]
+  likedSongs LikedSong[]
+  history    History[]
+  downloads  Download[]
+}
+
+model Song {
+  id       String  @id @default(uuid())
+  title    String
+  artist   String
+  album    String?
+  artwork  String?
+  duration Int
+  source   String
+  sourceId String  @unique
+
+  playlistSongs PlaylistSong[]
+  likedSongs    LikedSong[]
+  history       History[]
+  downloads     Download[]
+}
+
+model Artist {
+  id    String  @id @default(uuid())
+  name  String
+  image String?
+}
+
+model Album {
+  id       String  @id @default(uuid())
+  title    String
+  artistId String
+  artwork  String?
+}
+
+model Playlist {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  cover       String?
+  createdAt   DateTime @default(now())
+
+  user  User           @relation(fields: [userId], references: [id])
+  songs PlaylistSong[]
+}
+
+model PlaylistSong {
+  playlistId String
+  songId     String
+  position   Int
+
+  playlist Playlist @relation(fields: [playlistId], references: [id])
+  song     Song     @relation(fields: [songId], references: [id])
+
+  @@id([playlistId, songId])
+}
+
+model LikedSong {
+  userId    String
+  songId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  song Song @relation(fields: [songId], references: [id])
+
+  @@id([userId, songId])
+}
+
+model History {
+  id       String   @id @default(uuid())
+  userId   String
+  songId   String
+  playedAt DateTime @default(now())
+  duration Int
+
+  user User @relation(fields: [userId], references: [id])
+  song Song @relation(fields: [songId], references: [id])
+}
+
+model Download {
+  id           String   @id @default(uuid())
+  userId       String
+  songId       String
+  localUri     String
+  downloadedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  song Song @relation(fields: [songId], references: [id])
+}
