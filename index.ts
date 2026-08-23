@@ -42,33 +42,33 @@ app.get('/api/search', async (req, res) => {
 });
 
 // Stream audio from YouTube
-app.get('/api/stream/:videoId', (req, res) => {
+app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   const url = `https://www.youtube.com/watch?v=${videoId}`;
   
-  res.header('Content-Type', 'audio/mpeg');
-  
-  const subprocess = exec(url, {
-    output: '-',
-    format: 'bestaudio',
-    noCheckCertificates: true,
-    noWarnings: true,
-    addHeader: [
-      'referer:youtube.com',
-      'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36'
-    ]
-  });
+  try {
+    const output = await exec(url, {
+      dumpSingleJson: true,
+      noCheckCertificates: true,
+      noWarnings: true,
+      format: 'bestaudio',
+      addHeader: [
+        'referer:youtube.com',
+        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36'
+      ]
+    });
 
-  if (subprocess.stdout) {
-    subprocess.stdout.pipe(res);
-  }
-
-  subprocess.on('error', (err) => {
-    console.error('Stream error:', err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to stream audio', details: err.message });
+    // @ts-ignore
+    if (!output || !output.url) {
+      return res.status(404).json({ error: 'Stream not found' });
     }
-  });
+
+    // @ts-ignore
+    res.redirect(output.url);
+  } catch (error: any) {
+    console.error('Stream error:', error);
+    res.status(500).json({ error: 'Failed to extract stream', details: error.message });
+  }
 });
 
 app.listen(PORT, () => {
