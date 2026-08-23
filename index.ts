@@ -13,6 +13,20 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+app.get('/api/test-saavn-search', async (req, res) => {
+  try {
+    const query = req.query.q as string || 'bare minimum';
+    const saavnRes = await SaavnAPI.search.searchSongs({ query, page: 0, limit: 1 });
+    res.json(saavnRes);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
+app.get('/api/test-ytext', async (req, res) => {
+  res.send('Musico API is running');
+});
+
 app.get('/api/test-saavn', async (req, res) => {
   try {
     const r = await axios.get('https://saavn.dev/api/search/songs?query=bare+minimum');

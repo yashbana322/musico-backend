@@ -15,13 +15,23 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const yt_search_1 = __importDefault(require("yt-search"));
-const ytdl_core_1 = __importDefault(require("@distube/ytdl-core"));
 const dotenv_1 = __importDefault(require("dotenv"));
+const axios_1 = __importDefault(require("axios"));
+const SaavnAPI = require('saavnapi').default;
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3000;
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
+app.get('/api/test-saavn', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const r = yield axios_1.default.get('https://saavn.dev/api/search/songs?query=bare+minimum');
+        res.json(r.data);
+    }
+    catch (err) {
+        res.json({ error: err.message });
+    }
+}));
 // Basic health check
 app.get('/', (req, res) => {
     res.send('Musico API is running');
@@ -49,22 +59,53 @@ app.get('/api/search', (req, res) => __awaiter(void 0, void 0, void 0, function*
         res.status(500).json({ error: 'Failed to search' });
     }
 }));
-// Stream audio from YouTube
+// Stream audio from YouTube via JioSaavn Bridge
 app.get('/api/stream/:videoId', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { videoId } = req.params;
     try {
-        const url = `https://www.youtube.com/watch?v=${videoId}`;
-        const info = yield ytdl_core_1.default.getInfo(url);
-        const audioFormat = ytdl_core_1.default.chooseFormat(info.formats, { quality: 'highestaudio' });
-        if (!audioFormat) {
-            return res.status(404).json({ error: 'Audio format not found' });
+        // 1. Get YouTube video title
+        const videoResult = yield (0, yt_search_1.default)({ videoId });
+        if (!videoResult || !('title' in videoResult)) {
+            return res.status(404).json({ error: 'YouTube video not found' });
         }
-        res.header('Content-Type', 'audio/mpeg');
-        (0, ytdl_core_1.default)(url, { format: audioFormat }).pipe(res);
+        const video = videoResult;
+        // 2. Clean the title to maximize JioSaavn search hits
+        // Remove brackets, keywords, and take the first part of a "Title - Artist" format
+        let cleanTitle = video.title
+            .replace(/\[.*?\]|\(.*?\)/g, '')
+            .replace(/official|video|audio|lyrics|music|remix/gi, '')
+            .split('-')[0]
+            .trim();
+        // 3. Search JioSaavn
+        const saavnRes = yield SaavnAPI.search.searchSongs({ query: cleanTitle, page: 0, limit: 1 });
+        if (!saavnRes || !saavnRes.results || saavnRes.results.length === 0) {
+            // Fallback if cleanTitle yields nothing (try searching with artist)
+            let cleanArtist = '';
+            if ('author' in video && video.author && 'name' in video.author) {
+                cleanArtist = video.author.name.replace(/VEVO|Official/gi, '').trim();
+            }
+            const fallbackRes = yield SaavnAPI.search.searchSongs({ query: `${cleanTitle} ${cleanArtist}`.trim(), page: 0, limit: 1 });
+            if (!fallbackRes || !fallbackRes.results || fallbackRes.results.length === 0) {
+                return res.status(404).json({ error: 'Song not found on streaming proxy' });
+            }
+            saavnRes.results = fallbackRes.results;
+        }
+        const track = saavnRes.results[0];
+        if (!track.downloadUrl || track.downloadUrl.length === 0) {
+            return res.status(404).json({ error: 'Stream URL not available' });
+        }
+        // 4. Get the best quality stream (usually 320kbps or 160kbps MP4)
+        // The downloadUrl array usually contains objects like { quality: '320kbps', url: '...' }
+        // Sort descending by quality if needed, or just find 320/160.
+        const stream = track.downloadUrl.find((u) => u.quality === '320kbps')
+            || track.downloadUrl.find((u) => u.quality === '160kbps')
+            || track.downloadUrl[track.downloadUrl.length - 1]; // fallback to whatever is there
+        // 5. Redirect the mobile app natively to the MP4 URL
+        res.redirect(stream.url);
     }
     catch (error) {
         console.error('Stream error:', error);
-        res.status(500).json({ error: 'Failed to stream audio' });
+        res.status(500).json({ error: 'Failed to extract stream', details: error.message });
     }
 }));
 app.listen(PORT, () => {
