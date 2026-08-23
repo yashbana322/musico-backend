@@ -55,9 +55,9 @@ app.get('/api/stream/:videoId', async (req, res) => {
 
     res.header('Content-Type', 'audio/mpeg');
     ytdl(url, { format: audioFormat }).pipe(res);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Stream error:', error);
-    res.status(500).json({ error: 'Failed to stream audio' });
+    res.status(500).json({ error: 'Failed to stream audio', details: error.message });
   }
 });
 
