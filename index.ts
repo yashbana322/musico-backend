@@ -57,10 +57,11 @@ app.get('/api/stream/:videoId', async (req, res) => {
   
   try {
     // 1. Get YouTube video title
-    const video = await ytSearch({ videoId });
-    if (!video) {
+    const videoResult = await ytSearch({ videoId });
+    if (!videoResult || !('title' in videoResult)) {
       return res.status(404).json({ error: 'YouTube video not found' });
     }
+    const video = videoResult as any;
 
     // 2. Clean the title to maximize JioSaavn search hits
     // Remove brackets, keywords, and take the first part of a "Title - Artist" format
@@ -75,8 +76,12 @@ app.get('/api/stream/:videoId', async (req, res) => {
     
     if (!saavnRes || !saavnRes.results || saavnRes.results.length === 0) {
       // Fallback if cleanTitle yields nothing (try searching with artist)
-      const cleanArtist = video.author.name.replace(/VEVO|Official/gi, '').trim();
-      const fallbackRes = await SaavnAPI.search.searchSongs({ query: `${cleanTitle} ${cleanArtist}`, page: 0, limit: 1 });
+      let cleanArtist = '';
+      if ('author' in video && video.author && 'name' in video.author) {
+        cleanArtist = (video.author as any).name.replace(/VEVO|Official/gi, '').trim();
+      }
+      
+      const fallbackRes = await SaavnAPI.search.searchSongs({ query: `${cleanTitle} ${cleanArtist}`.trim(), page: 0, limit: 1 });
       if (!fallbackRes || !fallbackRes.results || fallbackRes.results.length === 0) {
         return res.status(404).json({ error: 'Song not found on streaming proxy' });
       }
