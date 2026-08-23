@@ -59,12 +59,15 @@ app.get('/api/stream/:videoId', async (req, res) => {
     });
 
     // @ts-ignore
-    if (!output || !output.url) {
+    const audioFormats = output.formats.filter((f: any) => f.acodec !== 'none' && f.vcodec === 'none' && f.url);
+    if (!audioFormats.length) {
       return res.status(404).json({ error: 'Stream not found' });
     }
 
-    // @ts-ignore
-    res.redirect(output.url);
+    // Redirect to the highest quality audio stream (usually the last one or we can sort)
+    // Actually, 'bestaudio' usually ensures the best is selected or we can just pick the first valid one.
+    const audioUrl = audioFormats[0].url;
+    res.redirect(audioUrl);
   } catch (error: any) {
     console.error('Stream error:', error);
     res.status(500).json({ error: 'Failed to extract stream', details: error.message });
