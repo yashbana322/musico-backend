@@ -21,6 +21,15 @@ const PIPED_INSTANCES = [
   'https://piped-api.garudalinux.org'
 ];
 
+app.get('/api/test-saavn', async (req, res) => {
+  try {
+    const r = await axios.get('https://saavn.dev/api/search/songs?query=bare+minimum');
+    res.json(r.data);
+  } catch (err: any) {
+    res.json({ error: err.message });
+  }
+});
+
 // Basic health check
 app.get('/', (req, res) => {
   res.send('Musico API is running');
