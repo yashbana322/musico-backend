@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import ytSearch from 'yt-search';
-import { exec } from 'youtube-dl-exec';
 import dotenv from 'dotenv';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -11,6 +11,15 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// List of public Piped API instances for round-robin extraction
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.tokhmi.xyz',
+  'https://pipedapi.smnz.de',
+  'https://api.piped.projectsegfau.lt',
+  'https://piped-api.garudalinux.org'
+];
 
 // Basic health check
 app.get('/', (req, res) => {
@@ -44,29 +53,34 @@ app.get('/api/search', async (req, res) => {
 // Stream audio from YouTube
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
-  const url = `https://www.youtube.com/watch?v=${videoId}`;
   
   try {
-    const output = await exec(url, {
-      dumpSingleJson: true,
-      noCheckCertificates: true,
-      noWarnings: true,
-      format: 'bestaudio',
-      addHeader: [
-        'referer:youtube.com',
-        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36'
-      ]
-    });
-
-    // @ts-ignore
-    const audioFormats = output.formats.filter((f: any) => f.acodec !== 'none' && f.vcodec === 'none' && f.url);
-    if (!audioFormats.length) {
-      return res.status(404).json({ error: 'Stream not found' });
+    let audioUrl = null;
+    
+    // Fallback through instances until one succeeds
+    for (const instance of PIPED_INSTANCES) {
+      try {
+        const response = await axios.get(`${instance}/streams/${videoId}`, {
+          timeout: 5000 // 5 second timeout per instance
+        });
+        
+        const data = response.data;
+        if (data && data.audioStreams && data.audioStreams.length > 0) {
+          // Prefer M4A for iOS/Android compatibility
+          const stream = data.audioStreams.find((s: any) => s.format === 'M4A' || s.mimeType.includes('m4a')) || data.audioStreams[0];
+          audioUrl = stream.url;
+          break; // Found a working URL
+        }
+      } catch (err) {
+        console.log(`Piped instance ${instance} failed, trying next...`);
+      }
     }
 
-    // Redirect to the highest quality audio stream (usually the last one or we can sort)
-    // Actually, 'bestaudio' usually ensures the best is selected or we can just pick the first valid one.
-    const audioUrl = audioFormats[0].url;
+    if (!audioUrl) {
+      return res.status(404).json({ error: 'Stream not found on any instance' });
+    }
+
+    // Redirect to the direct Google Video URL
     res.redirect(audioUrl);
   } catch (error: any) {
     console.error('Stream error:', error);
