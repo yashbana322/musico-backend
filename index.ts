@@ -3,6 +3,7 @@ import cors from 'cors';
 import ytSearch from 'yt-search';
 import dotenv from 'dotenv';
 import axios from 'axios';
+const SaavnAPI = require('saavnapi').default;
 
 dotenv.config();
 
@@ -11,15 +12,6 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-
-// List of public Piped API instances for round-robin extraction
-const PIPED_INSTANCES = [
-  'https://pipedapi.kavin.rocks',
-  'https://pipedapi.tokhmi.xyz',
-  'https://pipedapi.smnz.de',
-  'https://api.piped.projectsegfau.lt',
-  'https://piped-api.garudalinux.org'
-];
 
 app.get('/api/test-saavn', async (req, res) => {
   try {
@@ -59,38 +51,52 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// Stream audio from YouTube
+// Stream audio from YouTube via JioSaavn Bridge
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   
   try {
-    let audioUrl = null;
+    // 1. Get YouTube video title
+    const video = await ytSearch({ videoId });
+    if (!video) {
+      return res.status(404).json({ error: 'YouTube video not found' });
+    }
+
+    // 2. Clean the title to maximize JioSaavn search hits
+    // Remove brackets, keywords, and take the first part of a "Title - Artist" format
+    let cleanTitle = video.title
+      .replace(/\[.*?\]|\(.*?\)/g, '') 
+      .replace(/official|video|audio|lyrics|music|remix/gi, '')
+      .split('-')[0]
+      .trim();
+
+    // 3. Search JioSaavn
+    const saavnRes = await SaavnAPI.search.searchSongs({ query: cleanTitle, page: 0, limit: 1 });
     
-    // Fallback through instances until one succeeds
-    for (const instance of PIPED_INSTANCES) {
-      try {
-        const response = await axios.get(`${instance}/streams/${videoId}`, {
-          timeout: 5000 // 5 second timeout per instance
-        });
-        
-        const data = response.data;
-        if (data && data.audioStreams && data.audioStreams.length > 0) {
-          // Prefer M4A for iOS/Android compatibility
-          const stream = data.audioStreams.find((s: any) => s.format === 'M4A' || s.mimeType.includes('m4a')) || data.audioStreams[0];
-          audioUrl = stream.url;
-          break; // Found a working URL
-        }
-      } catch (err) {
-        console.log(`Piped instance ${instance} failed, trying next...`);
+    if (!saavnRes || !saavnRes.results || saavnRes.results.length === 0) {
+      // Fallback if cleanTitle yields nothing (try searching with artist)
+      const cleanArtist = video.author.name.replace(/VEVO|Official/gi, '').trim();
+      const fallbackRes = await SaavnAPI.search.searchSongs({ query: `${cleanTitle} ${cleanArtist}`, page: 0, limit: 1 });
+      if (!fallbackRes || !fallbackRes.results || fallbackRes.results.length === 0) {
+        return res.status(404).json({ error: 'Song not found on streaming proxy' });
       }
+      saavnRes.results = fallbackRes.results;
     }
 
-    if (!audioUrl) {
-      return res.status(404).json({ error: 'Stream not found on any instance' });
+    const track = saavnRes.results[0];
+    if (!track.downloadUrl || track.downloadUrl.length === 0) {
+      return res.status(404).json({ error: 'Stream URL not available' });
     }
 
-    // Redirect to the direct Google Video URL
-    res.redirect(audioUrl);
+    // 4. Get the best quality stream (usually 320kbps or 160kbps MP4)
+    // The downloadUrl array usually contains objects like { quality: '320kbps', url: '...' }
+    // Sort descending by quality if needed, or just find 320/160.
+    const stream = track.downloadUrl.find((u: any) => u.quality === '320kbps') 
+                || track.downloadUrl.find((u: any) => u.quality === '160kbps') 
+                || track.downloadUrl[track.downloadUrl.length - 1]; // fallback to whatever is there
+
+    // 5. Redirect the mobile app natively to the MP4 URL
+    res.redirect(stream.url);
   } catch (error: any) {
     console.error('Stream error:', error);
     res.status(500).json({ error: 'Failed to extract stream', details: error.message });
