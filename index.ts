@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import ytSearch from 'yt-search';
-import ytdl from '@distube/ytdl-core';
+import { exec } from 'youtube-dl-exec';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -42,23 +42,33 @@ app.get('/api/search', async (req, res) => {
 });
 
 // Stream audio from YouTube
-app.get('/api/stream/:videoId', async (req, res) => {
+app.get('/api/stream/:videoId', (req, res) => {
   const { videoId } = req.params;
-  try {
-    const url = `https://www.youtube.com/watch?v=${videoId}`;
-    const info = await ytdl.getInfo(url);
-    const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
-    
-    if (!audioFormat) {
-      return res.status(404).json({ error: 'Audio format not found' });
-    }
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+  
+  res.header('Content-Type', 'audio/mpeg');
+  
+  const subprocess = exec(url, {
+    output: '-',
+    format: 'bestaudio',
+    noCheckCertificates: true,
+    noWarnings: true,
+    addHeader: [
+      'referer:youtube.com',
+      'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36'
+    ]
+  });
 
-    res.header('Content-Type', 'audio/mpeg');
-    ytdl(url, { format: audioFormat }).pipe(res);
-  } catch (error: any) {
-    console.error('Stream error:', error);
-    res.status(500).json({ error: 'Failed to stream audio', details: error.message });
+  if (subprocess.stdout) {
+    subprocess.stdout.pipe(res);
   }
+
+  subprocess.on('error', (err) => {
+    console.error('Stream error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to stream audio', details: err.message });
+    }
+  });
 });
 
 app.listen(PORT, () => {
